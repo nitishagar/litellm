@@ -237,6 +237,7 @@ class _CompletionDispatchContext:
     optional_params: dict
     organization: Optional[str]
     provider_config: Optional[BaseConfig]
+    httpx_client: Optional[httpx.AsyncClient]
     shared_session: Optional[ClientSession]
     stream: Optional[bool]
     temperature: Optional[float]

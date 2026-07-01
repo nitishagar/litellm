@@ -445,6 +445,7 @@ async def acompletion(
     include_server_side_tool_invocations: Optional[bool] = None,
     # Session management
     shared_session: Optional["ClientSession"] = None,
+    httpx_client: Optional[httpx.AsyncClient] = None,
     # Per-request JSON schema validation (overrides litellm.enable_json_schema_validation)
     enable_json_schema_validation: Optional[bool] = None,
     **kwargs,
@@ -588,6 +589,7 @@ async def acompletion(
         "web_search_options": web_search_options,
         "include_server_side_tool_invocations": include_server_side_tool_invocations,
         "shared_session": shared_session,
+        "httpx_client": httpx_client,
         "enable_json_schema_validation": enable_json_schema_validation,
     }
     if custom_llm_provider is None:
@@ -1077,6 +1079,15 @@ def _build_custom_pricing_entry(
                 entry.setdefault(key, model_info[key])
 
     return entry
+
+
+def _is_openai_compatible_provider(custom_llm_provider: str) -> bool:
+    return (
+        custom_llm_provider == "openai"
+        or custom_llm_provider == "custom_openai"
+        or custom_llm_provider in litellm.openai_compatible_providers
+        or JSONProviderRegistry.exists(custom_llm_provider)
+    )
 
 
 def _complete_azure(ctx: _CompletionDispatchContext) -> _CompletionDispatchResult:
@@ -2282,6 +2293,7 @@ def _complete_custom_openai(
     custom_prompt_dict = ctx.custom_prompt_dict
     extra_headers = ctx.extra_headers
     headers = ctx.headers
+    httpx_client = ctx.httpx_client
     litellm_params = ctx.litellm_params
     logger_fn = ctx.logger_fn
     logging = ctx.logging
@@ -2353,6 +2365,12 @@ def _complete_custom_openai(
     ## COMPLETION CALL
     use_base_llm_http_handler = get_secret_bool("EXPERIMENTAL_OPENAI_BASE_LLM_HTTP_HANDLER")
 
+    if use_base_llm_http_handler and httpx_client is not None:
+        raise ValueError(
+            "httpx_client is not supported when EXPERIMENTAL_OPENAI_BASE_LLM_HTTP_HANDLER is enabled. "
+            "Disable that flag or omit httpx_client."
+        )
+
     try:
         if use_base_llm_http_handler:
             response = base_llm_http_handler.completion(
@@ -2394,6 +2412,7 @@ def _complete_custom_openai(
                 organization=organization,
                 custom_llm_provider=custom_llm_provider,
                 shared_session=shared_session,
+                httpx_client=httpx_client,
             )
     except Exception as e:
         ## LOGGING - log the original exception returned
@@ -4750,6 +4769,7 @@ def completion(  # type: ignore
     thinking: Optional[AnthropicThinkingParam] = None,
     # Session management
     shared_session: Optional["ClientSession"] = None,
+    httpx_client: Optional[httpx.AsyncClient] = None,
     # Per-request JSON schema validation (overrides litellm.enable_json_schema_validation)
     enable_json_schema_validation: Optional[bool] = None,
     **kwargs,
@@ -5035,6 +5055,19 @@ def completion(  # type: ignore
             custom_llm_provider=custom_llm_provider,
             web_search_options=web_search_options,
         )
+
+        if httpx_client is not None and not _is_openai_compatible_provider(custom_llm_provider):
+            raise ValueError(
+                f"httpx_client is only supported for OpenAI-compatible providers. "
+                f"Provider '{custom_llm_provider}' does not support a caller-supplied httpx.AsyncClient in v1. "
+                f"Supported providers: openai, custom_openai, and providers in litellm.openai_compatible_providers."
+            )
+
+        if httpx_client is not None and not kwargs.get("acompletion", False):
+            raise ValueError(
+                "httpx_client is only supported for acompletion(), not the synchronous completion(). "
+                "Use litellm.acompletion() instead."
+            )
 
         if not _should_allow_input_examples(custom_llm_provider=custom_llm_provider, model=model):
             tools = _drop_input_examples_from_tools(tools=tools)
@@ -5348,6 +5381,7 @@ def completion(  # type: ignore
             optional_params=optional_params,
             organization=organization,
             provider_config=provider_config,
+            httpx_client=httpx_client,
             shared_session=shared_session,
             stream=stream,
             temperature=temperature,
