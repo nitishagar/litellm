@@ -12,6 +12,7 @@ from litellm.proxy._types import (
 )
 from litellm.proxy.management_endpoints.scim.scim_v2 import (
     UserProvisionerHelpers,
+    _create_user_if_not_exists,
     _extract_group_member_ids,
     _handle_team_membership_changes,
     _process_group_patch_operations,
@@ -117,6 +118,7 @@ async def test_create_user_defaults_to_viewer(mocker, monkeypatch):
 
     called_args = new_user_mock.call_args.kwargs["data"]
     assert called_args.user_role == LitellmUserRoles.INTERNAL_USER_VIEW_ONLY
+    assert called_args.send_invite_email is False
 
 
 @pytest.mark.asyncio
@@ -2789,3 +2791,16 @@ async def test_patch_group_rename_recomputes_retained_members(mocker):
 
     recompute_mock.assert_awaited_once()
     assert set(recompute_mock.call_args[0][1]) == {"user1"}
+
+
+@pytest.mark.asyncio
+async def test_create_user_if_not_exists_passes_send_invite_email_false(mocker):
+    """Guard: group-membership user provisioning must never send invite emails."""
+    new_user_mock = mocker.patch(
+        "litellm.proxy.management_endpoints.internal_user_endpoints.new_user",
+        AsyncMock(return_value=NewUserResponse(user_id="u1", key="sk-k")),
+    )
+    await _create_user_if_not_exists(user_id="u1", created_via="scim_group")
+    new_user_mock.assert_awaited_once()
+    called_data = new_user_mock.call_args.kwargs["data"]
+    assert called_data.send_invite_email is False

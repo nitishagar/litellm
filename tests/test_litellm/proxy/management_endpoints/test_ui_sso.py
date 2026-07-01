@@ -7131,3 +7131,32 @@ async def test_legacy_login_page_hides_credentials_hint_via_general_settings():
     assert response.status_code == 200
     assert "Default Credentials" not in body
     assert "MASTER_KEY" not in body
+
+
+@pytest.mark.asyncio
+async def test_insert_sso_user_passes_send_invite_email_false():
+    """Guard: SSO user provisioning must never send invite emails (I7)."""
+    from litellm.proxy._types import SSOUserDefinedValues
+    from litellm.proxy.management_endpoints.ui_sso import insert_sso_user
+    from litellm.proxy.management_endpoints.types import CustomOpenID
+
+    mock_new_user_response = NewUserResponse(user_id="sso-u1", key="sk-sso")
+    with patch(
+        "litellm.proxy.management_endpoints.ui_sso.new_user",
+        return_value=mock_new_user_response,
+    ) as mock_new_user:
+        user_defined_values: SSOUserDefinedValues = {
+            "user_id": "sso-u1",
+            "user_email": "sso@example.com",
+            "user_role": None,
+            "max_budget": None,
+            "budget_duration": None,
+            "models": [],
+        }
+        await insert_sso_user(
+            result_openid=CustomOpenID(id="sso-u1", email="sso@example.com", team_ids=[]),
+            user_defined_values=user_defined_values,
+        )
+        mock_new_user.assert_called_once()
+        called_data = mock_new_user.call_args.kwargs["data"]
+        assert called_data.send_invite_email is False

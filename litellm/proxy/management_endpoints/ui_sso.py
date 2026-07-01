@@ -2254,6 +2254,7 @@ async def insert_sso_user(
         budget_duration=user_defined_values["budget_duration"],
         sso_user_id=user_defined_values["user_id"],
         auto_create_key=False,
+        send_invite_email=False,
     )
 
     if result_openid and hasattr(result_openid, "provider"):

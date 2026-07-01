@@ -578,6 +578,7 @@ async def _create_user_if_not_exists(user_id: str, created_via: str = "scim_grou
             metadata={"created_via": created_via},
             auto_create_key=False,
             user_role=default_role,
+            send_invite_email=False,
         )
 
         created_user = await new_user(data=new_user_request)
@@ -1088,6 +1089,7 @@ async def create_user(
             metadata=metadata,
             auto_create_key=False,
             user_role=resolved_role if admin_group is not None else default_role,
+            send_invite_email=False,
         )
 
         # Check if user with email already exists and update if found

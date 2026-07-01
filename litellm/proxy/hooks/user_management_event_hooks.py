@@ -27,6 +27,19 @@ from litellm.proxy.management_helpers.audit_logs import create_audit_log_for_upd
 from litellm.repositories.user_repository import UserRepository
 
 
+def _should_send_user_invitation_email(
+    send_invite_email: Optional[bool],
+    *,
+    email_configured: bool,
+    user_email: Optional[str],
+) -> bool:
+    if send_invite_email is True:
+        return True
+    if send_invite_email is False:
+        return False
+    return bool(email_configured and user_email)
+
+
 class UserManagementEventHooks:
     @staticmethod
     async def async_user_created_hook(
@@ -115,21 +128,40 @@ class UserManagementEventHooks:
             )
             use_enterprise_email_hooks = False
 
-        if use_enterprise_email_hooks and (data.send_invite_email is True):
+        enterprise_email_sent = False
+        if use_enterprise_email_hooks:
             initialized_email_loggers = litellm.logging_callback_manager.get_custom_loggers_for_type(
                 callback_type=BaseEmailLogger  # type: ignore
             )
-            if len(initialized_email_loggers) > 0:
+            if _should_send_user_invitation_email(
+                data.send_invite_email,
+                email_configured=bool(initialized_email_loggers),
+                user_email=response.user_email,
+            ):
                 for email_logger in initialized_email_loggers:
                     if isinstance(email_logger, BaseEmailLogger):  # type: ignore
-                        await email_logger.send_user_invitation_email(  # type: ignore
-                            event=event,
-                        )
+                        try:
+                            await email_logger.send_user_invitation_email(  # type: ignore
+                                event=event,
+                            )
+                            enterprise_email_sent = True
+                        except Exception as e:  # noqa: BLE001
+                            verbose_proxy_logger.warning(
+                                "Failed to send enterprise invitation email via {}: {}".format(
+                                    type(email_logger).__name__, str(e)
+                                )
+                            )
 
         #########################################################
         ########## LEGACY V1 USER INVITATION EMAIL ################
         #########################################################
-        if data.send_invite_email is True:
+        from litellm.proxy.proxy_server import general_settings
+
+        if not enterprise_email_sent and _should_send_user_invitation_email(
+            data.send_invite_email,
+            email_configured="email" in general_settings.get("alerting", []),
+            user_email=response.user_email,
+        ):
             await UserManagementEventHooks.send_legacy_v1_user_invitation_email(
                 data=data,
                 response=response,
